@@ -1,5 +1,7 @@
 import { InferenceClient } from "@huggingface/inference";
 
+const MAX_EMBED_CHARS = 1500;
+
 type HuggingFaceEmbeddingResponse = number[] | number[][] | number[][][];
 
 function meanPool(tokens: number[][]): number[] {
@@ -49,7 +51,8 @@ export async function embedText(input: string): Promise<number[]> {
     throw new Error("HUGGING_FACE_API_KEY is not configured.");
   }
 
-  const trimmed = input.length > 6000 ? input.slice(0, 6000) : input;
+  // Keep inputs under CodeBERT's 512-token limit; approximate with chars.
+  const trimmed = input.length > MAX_EMBED_CHARS ? input.slice(0, MAX_EMBED_CHARS) : input;
   const client = new InferenceClient(apiKey);
   const json = (await client.featureExtraction({
     model: "microsoft/codebert-base",
