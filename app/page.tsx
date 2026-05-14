@@ -41,6 +41,10 @@ export async function renderUsers(users: User[] | null, query: string) {
   return "<ul>" + rows.join("") + "</ul>";
 }`;
 
+const defaultOwner = "vercel";
+const defaultRepo = "next.js";
+const defaultPath = "packages/next/src/server/web/spec-extension/request.ts";
+
 function updateTool(tools: ToolState[], event: AgentProgressEvent): ToolState[] {
   if (!event.tool) {
     return tools;
@@ -67,11 +71,20 @@ function mergeCompletedResults(tools: ToolState[]): ToolResult[] {
   return tools.flatMap((tool) => (tool.result ? [tool.result] : []));
 }
 
+function extractGitHubUrl(value: string): string | null {
+  return value.match(/https?:\/\/(?:github\.com|raw\.githubusercontent\.com)\/\S+/)?.[0] ?? null;
+}
+
+function containsGitHubUrl(value: string): boolean {
+  return extractGitHubUrl(value) !== null;
+}
+
 function parseGitHubFileUrl(value: string): { owner: string; repo: string; path: string; ref: string } | null {
+  const candidate = extractGitHubUrl(value) ?? value.trim();
   let url: URL;
 
   try {
-    url = new URL(value.trim());
+    url = new URL(candidate);
   } catch {
     return null;
   }
@@ -103,9 +116,9 @@ export default function HomePage() {
   const [mode, setMode] = useState<"paste" | "github">("paste");
   const [code, setCode] = useState(sampleCode);
   const [language, setLanguage] = useState("typescript");
-  const [owner, setOwner] = useState("vercel");
-  const [repo, setRepo] = useState("next.js");
-  const [path, setPath] = useState("packages/next/src/server/web/spec-extension/request.ts");
+  const [owner, setOwner] = useState(defaultOwner);
+  const [repo, setRepo] = useState(defaultRepo);
+  const [path, setPath] = useState(defaultPath);
   const [ref, setRef] = useState("");
   const [tools, setTools] = useState<ToolState[]>(initialTools);
   const [synthesis, setSynthesis] = useState("");
@@ -117,12 +130,46 @@ export default function HomePage() {
 
   const results = useMemo(() => mergeCompletedResults(tools), [tools]);
 
+  function resetWorkspace(): void {
+    setMode("paste");
+    setCode(sampleCode);
+    setLanguage("typescript");
+    setOwner(defaultOwner);
+    setRepo(defaultRepo);
+    setPath(defaultPath);
+    setRef("");
+    setTools(initialTools);
+    setSynthesis("");
+    setReview(null);
+    setCached(false);
+    setError(null);
+  }
+
+  function applyGitHubFileUrl(value: string): boolean {
+    const parsed = parseGitHubFileUrl(value);
+
+    if (!parsed) {
+      return false;
+    }
+
+    setOwner(parsed.owner);
+    setRepo(parsed.repo);
+    setPath(parsed.path);
+    setRef(parsed.ref);
+    setError(null);
+    return true;
+  }
+
   async function loadGitHubFile(): Promise<void> {
     setGithubLoading(true);
     setError(null);
 
     try {
       const parsed = parseGitHubFileUrl(path) ?? parseGitHubFileUrl(owner);
+      if (!parsed && (containsGitHubUrl(path) || containsGitHubUrl(owner))) {
+        throw new Error("Paste a GitHub file URL that includes /blob/<branch>/path/to/file.");
+      }
+
       const request = parsed
         ? {
             owner: parsed.owner,
@@ -259,10 +306,7 @@ export default function HomePage() {
             </a>
             <button
               type="button"
-              onClick={() => {
-                setCode(sampleCode);
-                setLanguage("typescript");
-              }}
+              onClick={resetWorkspace}
               className="inline-flex h-9 items-center gap-2 border border-white/10 px-3 font-mono text-xs uppercase tracking-[0.16em] text-white/60 transition hover:border-white/25 hover:text-white"
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -314,15 +358,16 @@ export default function HomePage() {
                   />
                   <input
                     value={path}
+                    onPaste={(event) => {
+                      const pasted = event.clipboardData.getData("text");
+                      if (applyGitHubFileUrl(pasted)) {
+                        event.preventDefault();
+                      }
+                    }}
                     onChange={(event) => {
                       const nextPath = event.target.value;
-                      const parsed = parseGitHubFileUrl(nextPath);
 
-                      if (parsed) {
-                        setOwner(parsed.owner);
-                        setRepo(parsed.repo);
-                        setPath(parsed.path);
-                        setRef((current) => current || parsed.ref);
+                      if (applyGitHubFileUrl(nextPath)) {
                         return;
                       }
 

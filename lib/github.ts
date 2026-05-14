@@ -14,11 +14,20 @@ export type GitHubFileResponse = {
   content: string;
 };
 
+function extractGitHubUrl(value: string): string | null {
+  return value.match(/https?:\/\/(?:github\.com|raw\.githubusercontent\.com)\/\S+/)?.[0] ?? null;
+}
+
+function containsGitHubUrl(value: string): boolean {
+  return extractGitHubUrl(value) !== null;
+}
+
 function parseGitHubFileUrl(value: string): Partial<GitHubFileRequest> | null {
+  const candidate = extractGitHubUrl(value) ?? value.trim();
   let url: URL;
 
   try {
-    url = new URL(value.trim());
+    url = new URL(candidate);
   } catch {
     return null;
   }
@@ -53,6 +62,10 @@ export function normalizeGitHubFileRequest({
   ref
 }: GitHubFileRequest): GitHubFileRequest {
   const parsed = parseGitHubFileUrl(path) ?? parseGitHubFileUrl(owner);
+
+  if (!parsed && (containsGitHubUrl(path) || containsGitHubUrl(owner))) {
+    throw new Error("Paste a GitHub file URL that includes /blob/<branch>/path/to/file.");
+  }
 
   if (!parsed) {
     return { owner, repo, path, ref };
