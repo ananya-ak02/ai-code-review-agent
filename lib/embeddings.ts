@@ -1,6 +1,6 @@
 import { InferenceClient } from "@huggingface/inference";
 
-const MAX_EMBED_CHARS = 1500;
+const MAX_EMBED_CHARS = 700;
 
 type HuggingFaceEmbeddingResponse = number[] | number[][] | number[][][];
 
