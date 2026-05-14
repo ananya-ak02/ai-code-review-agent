@@ -67,6 +67,38 @@ function mergeCompletedResults(tools: ToolState[]): ToolResult[] {
   return tools.flatMap((tool) => (tool.result ? [tool.result] : []));
 }
 
+function parseGitHubFileUrl(value: string): { owner: string; repo: string; path: string; ref: string } | null {
+  let url: URL;
+
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+
+  const segments = url.pathname.split("/").filter(Boolean);
+
+  if (url.hostname === "github.com" && segments.length >= 5 && segments[2] === "blob") {
+    return {
+      owner: segments[0],
+      repo: segments[1],
+      ref: decodeURIComponent(segments[3]),
+      path: segments.slice(4).map(decodeURIComponent).join("/")
+    };
+  }
+
+  if (url.hostname === "raw.githubusercontent.com" && segments.length >= 4) {
+    return {
+      owner: segments[0],
+      repo: segments[1],
+      ref: decodeURIComponent(segments[2]),
+      path: segments.slice(3).map(decodeURIComponent).join("/")
+    };
+  }
+
+  return null;
+}
+
 export default function HomePage() {
   const [mode, setMode] = useState<"paste" | "github">("paste");
   const [code, setCode] = useState(sampleCode);
@@ -90,9 +122,23 @@ export default function HomePage() {
     setError(null);
 
     try {
-      const params = new URLSearchParams({ owner, repo, path });
-      if (ref.trim()) {
-        params.set("ref", ref.trim());
+      const parsed = parseGitHubFileUrl(path) ?? parseGitHubFileUrl(owner);
+      const request = parsed
+        ? {
+            owner: parsed.owner,
+            repo: parsed.repo,
+            path: parsed.path,
+            ref: ref.trim() || parsed.ref
+          }
+        : { owner, repo, path, ref };
+
+      const params = new URLSearchParams({
+        owner: request.owner,
+        repo: request.repo,
+        path: request.path
+      });
+      if (request.ref.trim()) {
+        params.set("ref", request.ref.trim());
       }
       const response = await fetch(`/api/github?${params.toString()}`);
       const payload = await response.json();
@@ -102,6 +148,10 @@ export default function HomePage() {
       }
 
       setCode(payload.content);
+      setOwner(request.owner);
+      setRepo(request.repo);
+      setPath(payload.path);
+      setRef(request.ref);
       const extension = String(payload.path).split(".").pop();
       if (extension === "ts") setLanguage("typescript");
       if (extension === "tsx") setLanguage("tsx");
@@ -264,7 +314,20 @@ export default function HomePage() {
                   />
                   <input
                     value={path}
-                    onChange={(event) => setPath(event.target.value)}
+                    onChange={(event) => {
+                      const nextPath = event.target.value;
+                      const parsed = parseGitHubFileUrl(nextPath);
+
+                      if (parsed) {
+                        setOwner(parsed.owner);
+                        setRepo(parsed.repo);
+                        setPath(parsed.path);
+                        setRef((current) => current || parsed.ref);
+                        return;
+                      }
+
+                      setPath(nextPath);
+                    }}
                     placeholder="src/file.ts"
                     className="h-8 min-w-[220px] flex-1 border border-white/10 bg-black px-2 font-mono text-xs text-white outline-none focus:border-[#00ff9d]"
                   />

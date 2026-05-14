@@ -14,21 +14,75 @@ export type GitHubFileResponse = {
   content: string;
 };
 
+function parseGitHubFileUrl(value: string): Partial<GitHubFileRequest> | null {
+  let url: URL;
+
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+
+  const segments = url.pathname.split("/").filter(Boolean);
+
+  if (url.hostname === "github.com" && segments.length >= 5 && segments[2] === "blob") {
+    return {
+      owner: segments[0],
+      repo: segments[1],
+      ref: decodeURIComponent(segments[3]),
+      path: segments.slice(4).map(decodeURIComponent).join("/")
+    };
+  }
+
+  if (url.hostname === "raw.githubusercontent.com" && segments.length >= 4) {
+    return {
+      owner: segments[0],
+      repo: segments[1],
+      ref: decodeURIComponent(segments[2]),
+      path: segments.slice(3).map(decodeURIComponent).join("/")
+    };
+  }
+
+  return null;
+}
+
+export function normalizeGitHubFileRequest({
+  owner,
+  repo,
+  path,
+  ref
+}: GitHubFileRequest): GitHubFileRequest {
+  const parsed = parseGitHubFileUrl(path) ?? parseGitHubFileUrl(owner);
+
+  if (!parsed) {
+    return { owner, repo, path, ref };
+  }
+
+  return {
+    owner: parsed.owner ?? owner,
+    repo: parsed.repo ?? repo,
+    path: parsed.path ?? path,
+    ref: ref?.trim() || parsed.ref
+  };
+}
+
 export async function fetchGitHubFile({
   owner,
   repo,
   path,
   ref
 }: GitHubFileRequest): Promise<GitHubFileResponse> {
-  const cleanOwner = owner.trim();
-  const cleanRepo = repo.trim();
-  const cleanPath = path.trim().replace(/^\/+/, "");
+  const normalized = normalizeGitHubFileRequest({ owner, repo, path, ref });
+  const cleanOwner = normalized.owner.trim();
+  const cleanRepo = normalized.repo.trim();
+  const cleanPath = normalized.path.trim().replace(/^\/+/, "");
 
   if (!cleanOwner || !cleanRepo || !cleanPath) {
     throw new Error("GitHub owner, repo, and file path are required.");
   }
 
-  const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+  const cleanRef = normalized.ref?.trim();
+  const query = cleanRef ? `?ref=${encodeURIComponent(cleanRef)}` : "";
   const response = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(cleanOwner)}/${encodeURIComponent(
       cleanRepo
